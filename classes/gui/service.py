@@ -395,10 +395,8 @@ class GuiService():
     def _eventPlaylistTrackDownloadStart(self, track:PlaylistTrack, playlist:Playlist, trackIndex:int):
         # get the current track widget
         trackList = self.getTrackWidgetList()
-        self.logger.debug("recieved event")
         if trackList:
             trackWidget = trackList[trackIndex]
-            self.logger.debug("Marking downloading as true")
             trackWidget.setDownloading(True)
     
     # runs when the audio progress changes (updated ~2/sec)

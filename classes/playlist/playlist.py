@@ -109,7 +109,6 @@ class Playlist():
         self._tracks = tracks        
     
     def setDownloaded(self, downloaded:bool):
-        logger.debug("Downloaded marked as true")
         self._downloaded = downloaded
         
     def getDownloaded(self):

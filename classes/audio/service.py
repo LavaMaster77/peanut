@@ -129,7 +129,7 @@ class AudioService():
                         self.logger.info(f"Track '{track.getDisplayName()}' isn't downloaded yet. Waiting for finish.")
                         self.eventService.triggerEvent("AUDIO_TRACK_START", track, playlist, self._currentIndex)
                         while (not tracks[self._currentIndex].getDownloaded()) and (not (shuffleEvent.is_set() or self._stopAudioEvent or selectEvent.is_set())):
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(0.02)
                         if (shuffleEvent.is_set() or self._stopAudioEvent):
                             # break and restart the playlist
                             break
@@ -170,7 +170,7 @@ class AudioService():
                         # set the progress bar progress
                         progress = playback.curr_pos / playback.duration
                         self.eventService.triggerEvent("AUDIO_TRACK_PROGRESS", progress, trackLength)
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.02)
                 if self._stopAudioEvent:
                     break # stop the loop without doing anything else
                 self.logger.info(f"Track '{track.getDisplayName()}' finished.")

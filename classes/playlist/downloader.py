@@ -143,7 +143,6 @@ class PlaylistDownloader():
             playlist.setThumbnailDownloaded(True)
         with yt_dlp.YoutubeDL(downloadOptions) as ydl:
             while not stopDownloading:
-                self.logger.debug("Starting loop")
                 for index, track in enumerate(playlist.getTracks()):
                     # if the index is not the requested start index, skip until it is
                     if index < startIndex: continue
@@ -155,7 +154,7 @@ class PlaylistDownloader():
                         continue
                     
                     # download + processing
-                    self.logger.info(f"Downloading video '{track.getDisplayName()}'.")
+                    self.logger.info(f"Downloading video '{track.getDisplayName()}'. Downloaded: {track.getDownloaded()}")
                     responseQueue.put({"action": "TRACK_DOWNLOAD_START", "track": track, "playlistName": playlist.getName(), "downloadIndex": index})
                     
                     # attempt to download video. will try multiple times. if max attempts is -1, then it will try indefinitely.

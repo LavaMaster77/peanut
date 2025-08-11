@@ -252,7 +252,6 @@ class ManagerService():
             # empty the data queue
             self.playlistService.emptyDownloadQueue()
             self.playlistService.downloadPlaylist(self.playlistService.getCurrentPlaylist().getName(), selectIndex)
-        self.logger.debug(f"Audio select event fired. select index: {selectIndex}")
         self.audioService.invokeSelectEvent(selectIndex)
     
     def _audioManagerEnd(self):

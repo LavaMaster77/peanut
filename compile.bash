@@ -14,9 +14,10 @@ venvName=".venv"
 compileFile="main.py"
 ytmusicapiLocalesFolder="$venvName\Lib\site-packages\ytmusicapi\locales"
 
-showConsole=0
+echo -en "Show console for this release (y/n)?\n>> "
+read showConsole
 
-if [ "$showConsole" -eq 1 ]; then
+if [[ "$showConsole" == "y" ]]; then
     consoleFlag="force"
 else
     consoleFlag="disable"
