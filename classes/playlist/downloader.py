@@ -147,6 +147,9 @@ class PlaylistDownloader():
                     # if the index is not the requested start index, skip until it is
                     if index < startIndex: continue
                     
+                    # if the current track is ignored, don't try to download it
+                    if track.getIgnored(): continue
+                    
                     if stopEvent.is_set():
                         stopDownloading = True
                         break
@@ -162,7 +165,7 @@ class PlaylistDownloader():
                     info: dict|None = None
                     success = True
                     while True:
-                        if (attemptCount == maxDownloadAttempts) and (maxDownloadAttempts != 1):
+                        if (attemptCount == maxDownloadAttempts) and (maxDownloadAttempts != -1):
                             # ran out of attempts
                             success = False
                             break
@@ -258,7 +261,9 @@ class PlaylistDownloader():
                         duration = track["duration"]
                         if duration == 0:
                             self.logger.warning(f"Track duration for {track['title']} is 0s which probably is not correct")
-                        playlistTrack = PlaylistTrack(videoURL=track["url"], name=self._sanitizeFilename(track["title"]), displayName=track["title"], index=index, length=duration)
+                        deleted = track["title"] == "[Deleted video]"
+                        playlistTrack = PlaylistTrack(videoURL=track["url"], name=self._sanitizeFilename(track["title"]), displayName=track["title"],
+                                                      index=index, length=duration, ignored=deleted)
                         tracks.append(playlistTrack)
             playlist.setTracks(tracks)
             playlist.setLength(len(tracks))

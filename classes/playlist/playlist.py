@@ -21,6 +21,13 @@ def sanitizeFilename(name: str) -> str:
 # logger for logging purposes
 logger = logging.getLogger(__name__)
 
+# helper method to safely retrieve a key from a dict without throwing an error
+def getSafeKey(dict:dict, key:any, fallback:any):
+    try:
+        return dict[key]
+    except KeyError:
+        return fallback
+
 class Playlist():
     
     # supports both using a playlist url and a file location
@@ -47,7 +54,7 @@ class Playlist():
                                                   downloaded=trackData["downloaded"], albumName=trackData["album name"],
                                                   length=trackData["length"],
                                                   albumDisplayName=trackData["album display name"], 
-                                                  artistName=trackData["artist name"]) for trackData in data["tracks"]]
+                                                  artistName=trackData["artist name"], ignored=getSafeKey(trackData, "ignored", False)) for trackData in data["tracks"]]
                     self._name = data["name"]
                     self._length = data["length"]
                     self._playlistURL = data["playlistURL"]

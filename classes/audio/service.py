@@ -120,11 +120,13 @@ class AudioService():
                 # clamp index
                 if self._currentIndex < 0: self._currentIndex = 0
                 track = tracks[self._currentIndex]
+                # skipping ignored tracks
+                if track.getIgnored(): continue
                 self.setCurrentTrack(track)
                 # check to see if anything's downloading
                 if not track.getDownloaded():
                     # track isn't downloaded, either skip it or wait
-                    if self.playlistService.getIsDownloading() or firstTrack:
+                    if self.playlistService.getCurrentDownloadingPlaylist() or firstTrack:
                         # wait for the download
                         self.logger.info(f"Track '{track.getDisplayName()}' isn't downloaded yet. Waiting for finish.")
                         self.eventService.triggerEvent("AUDIO_TRACK_START", track, playlist, self._currentIndex)

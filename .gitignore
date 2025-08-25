@@ -9,3 +9,4 @@
 /main.dist
 /test.dist
 /test.build
+**/__pycache__/

@@ -18,7 +18,7 @@ import sys
 import queue
 
 # run in different process. handles downloading logic.
-def _downloaderProcessManager(loggingQueue:multiprocessing.Queue, downloadQueue:multiprocessing.Queue, responseQueue:multiprocessing.Queue, stopEvent:Event, cancelEvent:Event):
+def _downloaderProcessManager(loggingQueue:multiprocessing.Queue, downloadQueue:multiprocessing.Queue, responseQueue:multiprocessing.Queue, stopEvent:Event):
     logger = logging.getLogger(f"{multiprocessing.current_process().name}")
     # clear any existing queue handlers
     logger.handlers.clear()
@@ -38,13 +38,7 @@ def _downloaderProcessManager(loggingQueue:multiprocessing.Queue, downloadQueue:
             responseQueue.put(None)
             break
         # send information communicating that the data was recieved
-        if not cancelEvent.is_set():
-            responseQueue.put({"action": "DATA_RECIEVED"})
-        else:
-            # cancel this current playlist download
-            responseQueue.put({"action": "CANCEL", "queueEmpty": downloadQueue.empty()})
-            cancelEvent.clear()
-            continue
+        responseQueue.put({"action": "DATA_RECIEVED"})
         playlist: Playlist = data["playlist"]
         match data["action"]:
             case "INITIALIZE":
@@ -87,7 +81,8 @@ class PlaylistService():
         self._playlists: dict[str, Playlist] = {}
         
         # keep track of downloading state
-        self._isDownloading = False
+        self._initializingPlaylist: str = ""
+        self._downloadingPlaylist: Playlist|None = None
         self._downloadQueueEmpty = True
         
         # current playlist
@@ -95,6 +90,10 @@ class PlaylistService():
         
         # keep track of the name of a playlist and its url (to avoid downloading the same thing twice)
         self._playlistURLDict: dict[str, str] = {}
+        
+        # sets the playlist to download next after the current downloading one finishes
+        self._nextPlaylist: str = ""
+        self._nextPlaylistIndex: int = -1 # used to store the index that the next playlist should start at (only used for selecting tracks)
     
     # start the service.
     def start(self):
@@ -107,7 +106,7 @@ class PlaylistService():
         # create the playlist downloader process
         self._downloaderProcess = self.threadService.createProcess(_downloaderProcessManager, "Playlist Downloader", start=True, 
                                                                    loggingQueue=self.loggingService.getLoggingQueue(), downloadQueue=self._downloadQueue, 
-                                                                   responseQueue=self._responseQueue, stopEvent=self._stopEvent, cancelEvent=self._cancelEvent)
+                                                                   responseQueue=self._responseQueue, stopEvent=self._stopEvent)
         # create the response listener thread
         self.threadService.createThread(self._playlistDownloadListener, "Playlist Download Listener")
         self.threadService.createThreadEvent("Playlist Downloader Close")
@@ -137,14 +136,14 @@ class PlaylistService():
                     # save the file
                     self.savePlaylistFile(name)
                     # mark the download as being complete
-                    self.setIsDownloading(False)
+                    self.setCurrentInitializatingPlaylist("")
                     self.eventService.triggerEvent("DOWNLOAD_STOP")
                 case "TRACK_DOWNLOAD_DONE": # a singular track finished downloading (or failed downloading)
                     playlistName = response["playlistName"]
                     # mark it as downloaded
                     track = response["track"]
+                    playlist = self.getPlaylist(playlistName)
                     if response["success"]:
-                        playlist = self.getPlaylist(playlistName)
                         playlist.updateTrack(track)
                         self.logger.debug(f"Marking track '{track.getDisplayName()}' as finished in the playlist service.")
                         # save the file. if this gets to be too cpu intensive, then stop doing this
@@ -164,17 +163,15 @@ class PlaylistService():
                     # set albums
                     playlist.setAlbums(response["albums"])
                     self.savePlaylistFile(playlist.getName())
-                    # if the queue is empty, actually mark the downloader as being done
-                    if response["queueEmpty"]:
-                        # mark the download as being complete
-                        self.logger.debug("Marking the downloader as stopping.")
-                        self.setIsDownloading(False)
-                        self.eventService.triggerEvent("DOWNLOAD_STOP")
-                case "CANCEL":
-                    if response["queueEmpty"]:
-                        self.logger.debug(f"Marking download as done via cancellation.")
-                        self.setIsDownloading(False)
-                        self.eventService.triggerEvent("DOWNLOAD_STOP")
+                    # if there was a request to download another playlist after this, do that
+                    nextPlaylist = self.getNextPlaylist()
+                    if nextPlaylist:
+                        self.downloadPlaylist(nextPlaylist, self._nextPlaylistIndex)
+                        self.setNextPlaylist()
+                        self._nextPlaylistIndex = -1
+                    else:
+                        self.logger.debug("Setting current downloading playlist to be None")
+                        self.setCurrentDownloadingPlaylist(None)
                         self.setDownloadQueueEmpty(True)
                 case "TRACK_DOWNLOAD_START":
                     # signal the start of the track download for the current playlist. mainly for gui updating
@@ -213,26 +210,31 @@ class PlaylistService():
     
     # sends a request to close the playlist downloader process.
     def closeDownloaderProcess(self):
-        isDownloading = self.getIsDownloading()
+        isDownloading = self.getCurrentDownloadingPlaylist() or self.getCurrentInitializatingPlaylist()
         if isDownloading:
             self.stopDownloadingPlaylist() # stop downloading first
         self._downloadQueue.put(None) # singal stop
     
     # signals to stop downloading the current playlist.
-    def stopDownloadingPlaylist(self, cancelNext:bool=None):
-        if cancelNext is None: cancelNext = True
+    def stopDownloadingPlaylist(self):
         self._stopEvent.set()
         # if there is stuff in the queue, clear it
         if not self.getDownloadQueueEmpty():
             self.logger.debug("Setting downloader cancel event.")
-            if cancelNext: self._cancelEvent.set()
     
-    def getIsDownloading(self):
-        return self._isDownloading
+    def setCurrentInitializatingPlaylist(self, name:str):
+        self._initializingPlaylist = name
+        return
     
-    # for playlist downloader
-    def setIsDownloading(self, downloading:bool):
-        self._isDownloading = downloading
+    def getCurrentInitializatingPlaylist(self):
+        return self._initializingPlaylist
+    
+    def setCurrentDownloadingPlaylist(self, playlist:Playlist):
+        self._downloadingPlaylist = playlist
+        return
+    
+    def getCurrentDownloadingPlaylist(self):
+        return self._downloadingPlaylist
     
     def addPlaylist(self, playlist:Playlist):
         name = playlist.getName()
@@ -260,37 +262,28 @@ class PlaylistService():
     
     def getDownloaderProcess(self):
         return self._downloaderProcess
-    
-    def getCurrentPlaylist(self):
-        return self._currentPlaylist
-    
-    def setCurrentPlaylist(self, playlist:Playlist|None):
-        # trigger the change event
-        if not self.getCurrentPlaylist() is playlist: 
-            self.eventService.triggerEvent("PLAYLIST_CURRENT_CHANGE", playlist)
-        self._currentPlaylist = playlist
-    
-    # bandaid solution for emptying the download queue.
-    def emptyDownloadQueue(self):
-        q = self._downloadQueue
-        count = 0
-        try:
-            while q.get_nowait():
-                count += 1
-        except queue.Empty:
-            pass
-        self.logger.debug(f"Download queue emptied. Cleared {count} entries.")
-        self.setDownloadQueueEmpty(True)
+  
+    # bandaid solution for emptying the download queue. try not to use lol
+    # def emptyDownloadQueue(self):
+    #     q = self._downloadQueue
+    #     count = 0
+    #     try:
+    #         while q.get_nowait():
+    #             count += 1
+    #     except queue.Empty:
+    #         pass
+    #     self.logger.debug(f"Download queue emptied. Cleared {count} entries.")
+    #     self.setDownloadQueueEmpty(True)
     
     # starts downloading a given playlist from its name. blocks the current thread/coroutine until it finishes.
     def downloadPlaylist(self, name:str, startIndex:int = None):
         if not startIndex: startIndex = 0
-        if self.getIsDownloading() and not self.getDownloadQueueEmpty():
-            self.logger.warning(f"Attempted to download playlist '{name}' even though one is already downloading.")
-            return
-        if not self.getDownloadQueueEmpty():
-            self.logger.warning(f"Attempted to download playlist '{name}' even though download queue was not empty.")
-            return
+        self.logger.debug("Downloading playlist")
+        if self.getCurrentDownloadingPlaylist():
+            self.logger.debug(f"Playlist downloader queue is empty; adding playlist '{name}' to download immediately after + stopping current download")
+            self.setNextPlaylist(name)
+            self.stopDownloadingPlaylist()
+            self._nextPlaylistIndex = startIndex
         # retrieve the playlist
         playlist = self.getPlaylist(name)
         if not playlist: return
@@ -306,18 +299,19 @@ class PlaylistService():
         data = {"downloadOptions": downloadOptions, "outputExtension": outputExtension, 
                 "thumbnailOutput": os.path.join(options["outputFolder"], name, "images"), 
             "playlistThumbnailLocation": os.path.join(options["outputFolder"], name, "thumbnail.jpg"), 
-            "useYoutubeMusicAlbums": True, "maxVariation": 600, "startIndex": startIndex, "maxDownloadAttempts": 3}
+            "useYoutubeMusicAlbums": True, "maxVariation": 600, "startIndex": startIndex, "maxDownloadAttempts": 1}
         # request the download
         # self.logger.info(f"Size of playlist '{playlist.getDisplayName()}': {sys.getsizeof(playlist)} bytes; size of data: {sys.getsizeof(data)}")
-        self.setIsDownloading(True)
+        self.setCurrentDownloadingPlaylist(playlist)
         self._downloadQueue.put({"action": "DOWNLOAD", "playlist": playlist, "data": data})
         self.setDownloadQueueEmpty(False)
+        self.logger.debug(f"Current downloading playlist: {self.getCurrentDownloadingPlaylist()}")
     
     # creates and initalizes a playlist object. blocks the current thread/coroutine until it finishes. 
     def createPlaylistFromURL(self, url:str):
         playlist = Playlist(playlistURL=url)
         # send into process to ..process
-        self.setIsDownloading(False)
+        self.setCurrentInitializatingPlaylist(url)
         self._downloadQueue.put({"action": "INITIALIZE", "playlist": playlist})
         self.setDownloadQueueEmpty(False)
     
@@ -344,4 +338,11 @@ class PlaylistService():
         if url in urldict:
             return urldict[url]
         return None
+    
+    def getNextPlaylist(self):
+        return self._nextPlaylist
+    
+    def setNextPlaylist(self, playlist:str|None=None):
+        if not playlist: playlist = ""
+        self._nextPlaylist = playlist
     

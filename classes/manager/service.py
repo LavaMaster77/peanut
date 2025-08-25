@@ -62,7 +62,7 @@ class ManagerService():
     
     def _actionShuffle(self):
         # if the shuffle event is set or the download queue is full, don't do anything
-        if (self.threadService.getAsyncioEvent("AUDIO_SHUFFLE").is_set() or ((not self.playlistService.getDownloadQueueEmpty() and self.playlistService.getIsDownloading()))): return
+        if (self.threadService.getAsyncioEvent("AUDIO_SHUFFLE").is_set() or ((not self.playlistService.getDownloadQueueEmpty() and self.playlistService.getCurrentDownloadingPlaylist()))): return
         # make sure a playlist is actually loaded
         playlist = self.audioService.getCurrentPlaylist()
         if playlist:
@@ -70,11 +70,8 @@ class ManagerService():
             # shuffle the playlist
             playlist.randomize()
             # if the playlist is downloading, restart the downloader
-            if self.playlistService.getIsDownloading():
+            if self.playlistService.getCurrentDownloadingPlaylist():
                 self.logger.debug("Restarting playlist download.")
-                self.playlistService.stopDownloadingPlaylist(False)
-                # empty the data queue
-                self.playlistService.emptyDownloadQueue()
                 self.playlistService.downloadPlaylist(playlist.getName())
             # send the shuffle request
             self.audioService.invokeShuffleEvent()
@@ -120,10 +117,10 @@ class ManagerService():
     def _actionDownload(self):
         self.logger.debug("Download button activated.")
         # either start the download or stop it
-        currentPlaylist = self.playlistService.getCurrentPlaylist()
+        currentPlaylist = self.audioService.getCurrentPlaylist()
         if not currentPlaylist: return
-        downloading = self.playlistService.getIsDownloading()
-        if downloading:
+        downloadingPlaylist = self.playlistService.getCurrentDownloadingPlaylist()
+        if downloadingPlaylist:
             # stop downloading the current playlist
             self.logger.debug("Stopping playlist download.")
             self.playlistService.stopDownloadingPlaylist()
@@ -160,21 +157,20 @@ class ManagerService():
         # stop the current audio manager
         self.eventService.triggerEvent("AUDIO_STOP")
         # unload the current audio player if it exists
-        if self.audioService.getCurrentPlaylist():
+        currentPlaylist = self.audioService.getCurrentPlaylist()
+        if currentPlaylist:
             self.audioService.unloadPlaylist()
-        currentPlaylist = self.playlistService.getCurrentPlaylist()
         # unload the current playlist in the playlist service
         if currentPlaylist:
             # save the current playlist file
             self.playlistService.savePlaylistFile(currentPlaylist.getName())
-            self.playlistService.setCurrentPlaylist(None)
         # if a playlist is downloading, stop it
-        if self.playlistService.getIsDownloading():
+        if self.playlistService.getCurrentDownloadingPlaylist() or self.playlistService.getCurrentInitializatingPlaylist():
             self.playlistService.stopDownloadingPlaylist()
 
     def _actionOrganize(self):
         # if the shuffle event is set or the download queue is full, don't do anything
-        if (self.threadService.getAsyncioEvent("AUDIO_SHUFFLE").is_set() or ((not self.playlistService.getDownloadQueueEmpty() and self.playlistService.getIsDownloading()))): return
+        if (self.threadService.getAsyncioEvent("AUDIO_SHUFFLE").is_set() or ((not self.playlistService.getDownloadQueueEmpty() and self.playlistService.getCurrentDownloadingPlaylist()))): return
         # make sure a playlist is actually loaded
         playlist = self.audioService.getCurrentPlaylist()
         if playlist:
@@ -182,11 +178,8 @@ class ManagerService():
             # shuffle the playlist
             playlist.getTracks().sort(key=lambda track: track.getIndex())
             # if the playlist is downloading, restart the downloader
-            if self.playlistService.getIsDownloading():
+            if self.playlistService.getCurrentDownloadingPlaylist():
                 self.logger.debug("Restarting playlist download.")
-                self.playlistService.stopDownloadingPlaylist(False)
-                # empty the data queue
-                self.playlistService.emptyDownloadQueue()
                 self.playlistService.downloadPlaylist(playlist.getName())
             # send the shuffle request
             self.audioService.invokeShuffleEvent()
@@ -222,11 +215,12 @@ class ManagerService():
     def _playlistSelectRequest(self, playlist:Playlist):
         name = playlist.getName()
         self.logger.info(f"Recieved request to select playlist '{name}'.")
-        # set the current playlist to this one
-        self.playlistService.setCurrentPlaylist(playlist)
-        # start the audio player
+        # start the audio player + set the playlist
+        previousPlaylist = self.audioService.getCurrentPlaylist()
         self.audioService.loadPlaylist(playlist)
-        # change the page to the audio player once everything is finished working
+        if not previousPlaylist is playlist:
+            # change the page to the audio player once everything is finished working
+            self.eventService.triggerEvent("PLAYLIST_CURRENT_CHANGE", playlist) 
     
     # GUI
     
@@ -246,17 +240,16 @@ class ManagerService():
     # Audio
     
     def _audioSelect(self, selectIndex:int):
+        self.logger.debug("Audio select event recieved.")
         # if the playlist is downloading, restart the downloader
-        if self.playlistService.getIsDownloading():
-            self.playlistService.stopDownloadingPlaylist(False)
-            # empty the data queue
-            self.playlistService.emptyDownloadQueue()
-            self.playlistService.downloadPlaylist(self.playlistService.getCurrentPlaylist().getName(), selectIndex)
+        dp = self.playlistService.getCurrentDownloadingPlaylist()
+        self.logger.debug(f"Downloading playlist: {dp}")
+        if self.playlistService.getCurrentDownloadingPlaylist():
+            self.logger.debug("here")
+            self.playlistService.downloadPlaylist(self.audioService.getCurrentPlaylist().getName(), selectIndex)
         self.audioService.invokeSelectEvent(selectIndex)
     
     def _audioManagerEnd(self):
-        # unload the playlist service's playlist
-        self.playlistService.setCurrentPlaylist(None)
         # go home
         self.eventService.triggerEvent("ACTION_HOME")
     

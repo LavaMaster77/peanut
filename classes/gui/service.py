@@ -375,10 +375,10 @@ class GuiService():
     def _eventPlaylistTrackDownload(self, playlist:Playlist, track:PlaylistTrack, trackIndex:int, success:bool):
         if self._closing: return
         trackList = self.getTrackWidgetList()
+        trackWidget = trackList[trackIndex]
         if trackList:
             if success:
                 # update the track data for the specific gui element
-                trackWidget = trackList[trackIndex]
                 self.updateTrackWidget(track, trackIndex)
                 if (track.getName() == self._currentTrack.getName()) and (track.getAlbumName()):
                     # update the album image
